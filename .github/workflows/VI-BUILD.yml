@@ -1,0 +1,52 @@
+# 只为一件事故意单独加的工作流：把越南语（Tiếng Việt）编进 SBE1V1K 固件。
+#
+# 为什么不改 SBE1V1K.yml：那个工作流只有 workflow_dispatch，触发它需要令牌具备
+# Actions: write 权限；改成 push 触发后，推送本身就是触发器，不需要任何额外权限。
+# 这里直接复用作者自己的 WRT-CORE.yml，编译逻辑、校验逻辑一行都不复制。
+#
+# 分支约定：
+#   vi-cfg  -> 只展开并校验配置（约 5~10 分钟），不编译，用来先确认
+#              CONFIG_LUCI_LANG_vi 能通过 make defconfig 且 luci-i18n-*-vi 被选上
+#   vi      -> 完整编译，产出固件 artifact
+name: Build SBE1V1K with Vietnamese
+
+on:
+  push:
+    branches: ["vi", "vi-cfg"]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve source and packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.resolve.outputs.commit }}
+      packages: ${{ steps.resolve.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve upstream commit and plugin snapshots
+        id: resolve
+        run: |
+          set -euo pipefail
+          commit=$(python3 Scripts/checkout_source.py --resolve-only)
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
+          packages=$(python3 Scripts/resolve_packages.py --manifest Config/packages.json)
+          printf 'packages=%s\n' "$packages" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: SBE1V1K WiFi-yes
+    needs: prepare
+    uses: ./.github/workflows/WRT-CORE.yml
+    with:
+      wifi: "yes"
+      config_only: ${{ contains(github.ref_name, 'cfg') }}
+      source_snapshot: ${{ needs.prepare.outputs.commit }}
+      package_snapshots: ${{ needs.prepare.outputs.packages }}
+      build_attempt: "1"
